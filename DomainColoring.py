@@ -9,12 +9,6 @@ from colorsys import hsv_to_rgb
 from timeit import default_timer as time
 from numba import njit, jit, prange
 
-predefFuncs = ['acos((1+1j)*log(sin(z**3-1)/z))', '(1+1j)*log(sin(z**3-1)/z)', '(1+1j)*sin(z)',
-               'z + z**2/sin(z**4-1)', 'log(sin(z))', 'cos(z)/(sin(z**4-1)', 'z**6-1',
-               '(z**2-1) * (z-2-1j)**2 / (z**2+2*1j)', 'sin(z)*(1+2j)', 'sin(1/z)', 'sin(z)*sin(1/z)',
-               '1/sin(1/sin(z))', 'z', '(z**2+1)/(z**2-1)', '(z**2+1)/z', '(z+3)*(z+1)**2',
-               '(z/2)**2*(z+1-2j)*(z+2+2j)/z**3', '(z**2)-0.75-(0.2*j)']
-
 
 class DomainColoring:
 
@@ -200,7 +194,7 @@ class DomainColoring_paralell:
 
 class DomainColoring_paralell_jit_expression:
 
-    def z_compiler(fz): # must be used externally and generated func as parameter of 'generateColors'
+    def z_compiler(fz):  # must be used externally and generated func as parameter of 'generateColors'
         ns = {}
         exec(f'''
 from cmath import sin, cos, tan, asin, acos, atan, log, exp
@@ -317,7 +311,7 @@ def test_dc_paralell_jit_expression(n):
                     '1/sin(1/sin(z))', 'z', '(z**2+1)/(z**2-1)', '(z**2+1)/z', '(z+3)*(z+1)**2',
                     '(z/2)**2*(z+c(1,2))*(z+c(2,2))/z**3', '(z**2)-0.75-c(0,0.2)']
 
-    fx=predef_funcs[5]
+    fx = predef_funcs[5]
     z_expr = DomainColoring_paralell_jit_expression.z_compiler(fx)
     DomainColoring_paralell_jit_expression.generateColors(z_expr, 2, 2)  # warm up
 
