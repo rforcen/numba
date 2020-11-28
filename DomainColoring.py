@@ -102,11 +102,11 @@ def __z_expr(z):
 
 if __name__ == '__main__':
     def test_dc(n):
-        predef_funcs = ['acos(c(1,2)*log(sin(z**3-1)/z))', 'c(1,1)*log(sin(z**3-1)/z)', 'c(1,1)*sin(z)',
+        predef_funcs = ['acos(1+2j*log(sin(z**3-1)/z))', '1+1j*log(sin(z**3-1)/z)', '1+1j*sin(z)',
                         'z + z**2/sin(z**4-1)', 'log(sin(z))', 'cos(z)/(sin(z**4-1))', 'z**6-1',
-                        '(z**2-1) * (z-c(2,1))**2 / (z**2+c(2,1))', 'sin(z)*c(1,2)', 'sin(1/z)', 'sin(z)*sin(1/z)',
+                        '(z**2-1) * (z-2+1j)**2 / (z**2+2+1j)', 'sin(z)*1+2j', 'sin(1/z)', 'sin(z)*sin(1/z)',
                         '1/sin(1/sin(z))', 'z', '(z**2+1)/(z**2-1)', '(z**2+1)/z', '(z+3)*(z+1)**2',
-                        '(z/2)**2*(z+c(1,2))*(z+c(2,2))/z**3', '(z**2)-0.75-c(0,0.2)']
+                        '(z/2)**2*(z+1+2j)*(z+2+2j)/z**3', '(z**2)-0.75-0.2j']
 
         for fz in predef_funcs:
             t0 = time()
