@@ -5,7 +5,7 @@ ZExpression class usage
 zx=ZExpression(zexpression_string)
 zx.eval(z)
 '''
-from cmath import sin, cos, tan, asin, acos, atan, log, exp
+from cmath import isfinite, sin, cos, tan, asin, acos, atan, log, exp
 from timeit import default_timer as timer
 
 import numba
@@ -161,18 +161,25 @@ class Tree_pCodeGenerator(Transformer):
                 SCOMPLEX: 'complex', SSIN: 'sin', SCOS: 'cos', STAN: 'tan', SASIN: 'asin', SACOS: 'acos', SATAN: 'atan',
                 SLOG: 'log', SEXP: 'exp'}
 
+    MAX_CODE = 1024 * 10
+    MAX_TAB = 1024
+
     def __init__(self):
         self.reset()
 
     def reset(self):
-        self.code = np.empty(0, np.int8)
-        self.const_tab = np.empty(0, np.complex)
+        self.code = np.empty(self.MAX_CODE, np.int8)
+        self.const_tab = np.empty(self.MAX_TAB, np.complex)
+        self.pc = 0
+        self.itab = 0
 
     def gen(self, instr):
-        self.code = np.append(self.code, instr)
+        self.code[self.pc] = instr
+        self.pc += 1
 
     def insert_const(self, z_const):
-        self.const_tab = np.append(self.const_tab, z_const)
+        self.const_tab[self.itab] = z_const
+        self.itab += 1
 
     def add(self, v0, v1):
         self.gen(SADD)
@@ -191,7 +198,7 @@ class Tree_pCodeGenerator(Transformer):
 
     def number(self, v0):
         self.gen(SPUSHC)
-        self.gen(len(self.const_tab))
+        self.gen(self.itab)
 
         self.insert_const(complex(float(v0), 0))
 
@@ -206,6 +213,10 @@ class Tree_pCodeGenerator(Transformer):
         self.gen(len(self.const_tab))
 
         self.insert_const(complex(float(v0), float(v1)))
+
+    def finish(self):
+        self.code = np.resize(self.code, self.pc)
+        self.const_tab = np.resize(self.const_tab, self.itab)
 
     def func(self, v0, v1):
         f = v0.children[0].value
@@ -234,7 +245,7 @@ class Tree_pCodeGenerator(Transformer):
         pc = 0
         stack = []
 
-        while pc < len(self.code):
+        while pc < self.pc:
             c = self.code[pc]
             if c == SPUSHC:
                 stack.append(self.const_tab[self.code[pc + 1]])
@@ -279,65 +290,6 @@ class Tree_pCodeGenerator(Transformer):
         return stack[0]
 
 
-@numba.njit(fastmath=True, cache=True)
-def execute_pcode(z, code, const_tab):
-    stack = np.empty(1024, dtype=np.complex64)
-    pc: int = 0
-    sp: int = 0
-    zero = 0 + 0j
-
-    while pc < len(code):
-        c = code[pc]
-        if c == SPUSHC:
-            stack[sp] = const_tab[code[pc + 1]]
-            sp += 1
-            pc += 1
-        elif c == SPUSHZ:
-            stack[sp] = z
-            sp += 1
-        elif c == SADD:
-            sp -= 2
-            stack[sp] += stack[sp + 1]
-            sp += 1
-        elif c == SSUB:
-            sp -= 2
-            stack[sp] -= stack[sp + 1]
-            sp += 1
-        elif c == SMUL:
-            sp -= 2
-            stack[sp] *= stack[sp + 1]
-            sp += 1
-        elif c == SDIV:
-            sp -= 2
-            stack[sp] = stack[sp] / stack[sp + 1] if stack[sp + 1] != zero else zero
-            sp += 1
-        elif c == SPOW:
-            sp -= 2
-            stack[sp] = stack[sp] ** stack[sp + 1]
-            sp += 1
-        elif c == SNEG:
-            stack[sp - 1] = -stack[sp - 1]
-        elif c == SSIN:
-            stack[sp - 1] = sin(stack[sp - 1])
-        elif c == SCOS:
-            stack[sp - 1] = cos(stack[sp - 1])
-        elif c == STAN:
-            stack[sp - 1] = tan(stack[sp - 1])
-        if c == SASIN:
-            stack[sp - 1] = asin(stack[sp - 1])
-        elif c == SACOS:
-            stack[sp - 1] = acos(stack[sp - 1])
-        elif c == SATAN:
-            stack[sp - 1] = atan(stack[sp - 1])
-        elif c == SLOG:
-            stack[sp - 1] = log(stack[sp - 1]) if stack[sp - 1] != zero else zero
-        elif c == SEXP:
-            stack[sp - 1] = exp(stack[sp - 1])
-
-        pc += 1
-    return stack[0]
-
-
 '''
 ZExpression usage
 zx=ZExpression(zexpression_string)
@@ -346,15 +298,25 @@ zx.eval(z)
 
 
 class ZExpression:
-    def __init__(self, fx=None):
+    def __init__(self, fz='z'):
+        self.set_fz(fz)
+
+    def set_fz(self, fz):
         self.tr = Tree_pCodeGenerator()
         self.z_parser = Lark(z_grammar, parser='lalr', transformer=self.tr)
         self.parser = self.z_parser.parse
-        if fx is not None:
-            self.compile(fx)
 
+        if fz is not None:
+            self.compile(fz)
+        return self.get_exec()
+
+    def get_exec(self):
+        return ZExpression.execute_pcode, self.tr.code, self.tr.const_tab
+
+    @staticmethod
     @numba.njit(fastmath=True, cache=True)
     def execute_pcode(z, code, const_tab):
+
         stack = np.empty(1024, dtype=np.complex64)
         pc: int = 0
         sp: int = 0
@@ -383,12 +345,15 @@ class ZExpression:
                 sp += 1
             elif c == SDIV:
                 sp -= 2
-                stack[sp] = stack[sp] / stack[sp + 1] if stack[sp + 1] != zero else zero
+                stack[sp] = stack[sp] / stack[sp + 1] if stack[sp + 1] != zero and isfinite(stack[sp + 1]) and isfinite(
+                    stack[sp]) else zero
                 sp += 1
+
             elif c == SPOW:
                 sp -= 2
                 stack[sp] = stack[sp] ** stack[sp + 1]
                 sp += 1
+
             elif c == SNEG:
                 stack[sp - 1] = -stack[sp - 1]
             elif c == SSIN:
@@ -397,7 +362,7 @@ class ZExpression:
                 stack[sp - 1] = cos(stack[sp - 1])
             elif c == STAN:
                 stack[sp - 1] = tan(stack[sp - 1])
-            if c == SASIN:
+            elif c == SASIN:
                 stack[sp - 1] = asin(stack[sp - 1])
             elif c == SACOS:
                 stack[sp - 1] = acos(stack[sp - 1])
@@ -409,13 +374,16 @@ class ZExpression:
                 stack[sp - 1] = exp(stack[sp - 1])
 
             pc += 1
+
         return stack[0]
 
     def compile(self, fx):
         self.tree = self.parser(fx)
+        self.tr.finish()
+        self.eval()  # warm up
 
-    def eval(self, z):
-        return execute_pcode(z=z, code=self.tr.code, const_tab=self.tr.const_tab)
+    def eval(self, z=1 + 1j):
+        return ZExpression.execute_pcode(z=z, code=self.tr.code, const_tab=self.tr.const_tab)
 
 
 if __name__ == '__main__':
@@ -456,7 +424,6 @@ if __name__ == '__main__':
         z_gen = z_parser.parse
 
         z = 1 + 1j
-        execute_pcode(z=z, code=tr.code, const_tab=tr.const_tab)  # warm up
 
         tot_t = 0.
         n = int(5e4)
@@ -468,27 +435,43 @@ if __name__ == '__main__':
             t = timer()
 
             for i in range(n):
-                zr = execute_pcode(z=z, code=tr.code, const_tab=tr.const_tab)
+                zr = ZExpression.execute_pcode(z=z, code=tr.code, const_tab=tr.const_tab)
             tot_t += timer() - t
             # print(eval(f), zr)
         print(f'total time: {tot_t}')
 
 
+    @numba.njit(parallel=True, fastmath=True) # eval code in njit using zeval evaluator
+    def njit_eval_sum(zeval, code, const_tab, z, n):
+        # print(zexec, code, const_tab)
+        res = np.empty(n, dtype=numba.complex64)
+        for i in numba.prange(n): # do parallel eval
+            res[i] = zeval(z, code, const_tab)
+        s = 0 + 0j
+        for i in numba.prange(n):
+            s += res[i]
+        return s
+
+
     def test_expr():
-        n = int(5e4)
+        n = int(1e5)
         z = 1 + 1j
         tot_t = 0.
 
         print(f'running zexpression on {n} loops...')
+        zx = ZExpression()
 
         for f in predefFuncs:
-            zx = ZExpression(f)
+            zeval, code, const_tab = zx.set_fz(f)
+            # print(zexec, code, const_tab)
+
             t = timer()
 
-            for _ in range(n):
-                zr = zx.eval(z)
+            zrs = njit_eval_sum(zeval, code, const_tab, z, n)
 
             tot_t += timer() - t
+
+            print(f'{f:50} {zrs}')
         print(f'total time: {tot_t}')
 
 

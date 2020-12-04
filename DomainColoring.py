@@ -8,28 +8,39 @@ import numpy as np
 from PIL import Image
 from numba import njit, prange
 
+from z_parser import ZExpression
+
 
 class DomainColoring:  # jit, parallel and expression evaluator
-
     @staticmethod
     def z_compiler(fz):  # must be used externally and generated func as parameter of 'generate'
         ns = {}
         exec(f'''
-from cmath import sin, cos, tan, asin, acos, atan, log, exp
-def __z_expr(z):
-    def c(re, im): return complex(re, im)
-    return {fz}
-    ''', ns, ns)
+    from cmath import sin, cos, tan, asin, acos, atan, log, exp
+    def __z_expr(z):
+        def c(re, im): return complex(re, im)
+        return {fz}
+        ''', ns, ns)
 
         return njit(ns['__z_expr'])
 
     @staticmethod
-    def generate(fz, h, w):
+    def generate_llvm_exec(fz, h, w):
         return DomainColoring._generate_z_compiled(DomainColoring.z_compiler(fz), w, h)
 
     @staticmethod
     @njit(parallel=True, fastmath=True)
-    def _generate_z_compiled(zExpression, h, w):
+    def _generate_z_compiled_llvm_exec(zExpression, h, w):
+        pass
+
+    @staticmethod
+    def generate(fz, h, w):
+        zeval, code, const_tab = ZExpression().set_fz(fz)
+        return DomainColoring._generate_z_compiled(zeval, code, const_tab, w, h)
+
+    @staticmethod
+    @njit(parallel=True, fastmath=True)
+    def _generate_z_compiled(zeval, code, const_tab, h, w):
 
         pow3 = lambda x: x * x * x
         rgb2i = lambda r, g, b: 0xff00_0000 | (int(r * 255.) << 16) | (int(g * 255.) << 8) | int(b * 255.)
@@ -75,7 +86,7 @@ def __z_expr(z):
                 re = rma - (rma - rmi) * i / w
 
                 try:
-                    v = zExpression(complex(re, im))
+                    v = zeval(complex(re, im), code, const_tab)
                 except:
                     continue
 
@@ -102,19 +113,19 @@ def __z_expr(z):
 
 if __name__ == '__main__':
     def test_dc(n):
-        predef_funcs = ['acos(1+2j*log(sin(z**3-1)/z))', '1+1j*log(sin(z**3-1)/z)', '1+1j*sin(z)',
-                        'z + z**2/sin(z**4-1)', 'log(sin(z))', 'cos(z)/(sin(z**4-1))', 'z**6-1',
-                        '(z**2-1) * (z-2+1j)**2 / (z**2+2+1j)', 'sin(z)*1+2j', 'sin(1/z)', 'sin(z)*sin(1/z)',
-                        '1/sin(1/sin(z))', 'z', '(z**2+1)/(z**2-1)', '(z**2+1)/z', '(z+3)*(z+1)**2',
-                        '(z/2)**2*(z+1+2j)*(z+2+2j)/z**3', '(z**2)-0.75-0.2j']
+        predefFuncs = ['acos(c(1,2)*log(sin(z**3-1)/z))', 'c(1,1)*log(sin(z**3-1)/z)', 'c(1,1)*sin(z)',
+                       'z + z**2/sin(z**4-1)', 'log(sin(z))', 'cos(z)/(sin(z**4-1))', 'z**6-1',
+                       '(z**2-1) * (z-c(2,1))**2 / (z**2+c(2,1))', 'sin(z)*c(1,2)', 'sin(1/z)', 'sin(z)*sin(1/z)',
+                       '1/sin(1/sin(z))', 'z', '(z**2+1)/(z**2-1)', '(z**2+1)/z', '(z+3)*(z+1)**2',
+                       '(z/2)**2*(z+c(1,2))*(z+c(2,2))/z**3', '(z**2)-0.75-c(0,0.2)']
 
-        for fz in predef_funcs:
+        for i, fz in enumerate(predefFuncs):
             t0 = time()
             img = DomainColoring.generate(fz, n, n)
             t0 = time() - t0
 
             print(f'domain coloring: {fz}, lap for {n} x {n} items, numba parallel njit expression:{t0}')
-            Image.frombytes(mode='RGBA', size=(n, n), data=img).show(fz)  # .save('voronoi.png', format='png')
+            Image.frombytes(mode='RGBA', size=(n, n), data=img).show(f'dc{i}.png')  # save(f'dc{i}.png', format='png')
 
 
     test_dc(1024)
