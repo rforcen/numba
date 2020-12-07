@@ -8,12 +8,12 @@ zx.eval(z)
 from cmath import isfinite, sin, cos, tan, asin, acos, atan, log, exp
 from timeit import default_timer as timer
 
-import numba
 import numpy as np
 from lark import Lark, Transformer, v_args
+from numba import njit, prange, int32, int8, complex64
 
 z_grammar = """
-    ?start: sum
+    ?start: sum -> expression
 
     ?sum: product
         | sum "+" product   -> add
@@ -44,8 +44,8 @@ z_grammar = """
 """
 
 # tokens
-SADD, SSUB, SMUL, SDIV, SPOW, SPUSHC, SNEG, SPUSHZ, SCOMPLEX, SSIN, SCOS, STAN, SASIN, SACOS, SATAN, SLOG, SEXP = range(
-    17)
+SPUSHC, SPUSHZ, SCOMPLEX, SADD, SSUB, SMUL, SDIV, SPOW, SNEG, SSIN, SCOS, STAN, SASIN, SACOS, SATAN, SLOG, SEXP, SEND = range(
+    18)
 
 
 @v_args(inline=True)  # print nmemotecnic p-code
@@ -79,6 +79,8 @@ class Tree_StackPcode(Transformer):
     def complex(self, v0, v1): print('complex')
 
     def func(self, v0, v1): print(v0.children[0].value)
+
+    def expression(self, v0): print('end')
 
 
 @v_args(inline=True)  # evaluate expression
@@ -210,9 +212,12 @@ class Tree_pCodeGenerator(Transformer):
 
     def complex(self, v0, v1):
         self.gen(SPUSHC)
-        self.gen(len(self.const_tab))
+        self.gen(self.itab)
 
         self.insert_const(complex(float(v0), float(v1)))
+
+    def expression(self, v0):
+        self.gen(SEND)
 
     def finish(self):
         self.code = np.resize(self.code, self.pc)
@@ -285,6 +290,8 @@ class Tree_pCodeGenerator(Transformer):
                 stack[-1] = log(stack[-1])
             elif c == SEXP:
                 stack[-1] = exp(stack[-1])
+            elif c == SEND:
+                break
 
             pc += 1
         return stack[0]
@@ -298,89 +305,93 @@ zx.eval(z)
 
 
 class ZExpression:
-    def __init__(self, fz='z'):
-        self.set_fz(fz)
 
-    def set_fz(self, fz):
-        self.tr = Tree_pCodeGenerator()
-        self.z_parser = Lark(z_grammar, parser='lalr', transformer=self.tr)
-        self.parser = self.z_parser.parse
+    def __init__(_, fz='z'):
+        _.tr, _.z_parser, _.parser = None, None, None
+        _.set_fz(fz)
+
+    def set_fz(_, fz):
+        _.tr = Tree_pCodeGenerator()
+        _.z_parser = Lark(z_grammar, parser='lalr', transformer=_.tr)
+        _.parser = _.z_parser.parse
 
         if fz is not None:
-            self.compile(fz)
-        return self.get_exec()
+            _.compile(fz)
+        return _.get_exec()
 
-    def get_exec(self):
-        return ZExpression.execute_pcode, self.tr.code, self.tr.const_tab
+    def get_exec(_):
+        return ZExpression.execute_pcode, _.tr.code, _.tr.const_tab
 
     @staticmethod
-    @numba.njit(fastmath=True, cache=True)
+    @njit(fastmath=True, cache=True)
     def execute_pcode(z, code, const_tab):
+        MAX_STACK: int32 = 1024
+        stack = np.empty(MAX_STACK, dtype=complex64)
 
-        stack = np.empty(1024, dtype=np.complex64)
-        pc: int = 0
-        sp: int = 0
-        zero = 0 + 0j
+        sp: int32 = 0
+        pc: int32 = 0
+        cc: int8 = code[pc]
+        zero: complex64 = 0 + 0j
 
-        while pc < len(code):
-            c = code[pc]
-            if c == SPUSHC:
+        while cc != SEND:
+            if cc == SPUSHC:
                 stack[sp] = const_tab[code[pc + 1]]
                 sp += 1
                 pc += 1
-            elif c == SPUSHZ:
+            elif cc == SPUSHZ:
                 stack[sp] = z
                 sp += 1
-            elif c == SADD:
+            elif cc == SADD:
                 sp -= 2
                 stack[sp] += stack[sp + 1]
                 sp += 1
-            elif c == SSUB:
+            elif cc == SSUB:
                 sp -= 2
                 stack[sp] -= stack[sp + 1]
                 sp += 1
-            elif c == SMUL:
+            elif cc == SMUL:
                 sp -= 2
                 stack[sp] *= stack[sp + 1]
                 sp += 1
-            elif c == SDIV:
+            elif cc == SDIV:
                 sp -= 2
                 stack[sp] = stack[sp] / stack[sp + 1] if stack[sp + 1] != zero and isfinite(stack[sp + 1]) and isfinite(
                     stack[sp]) else zero
                 sp += 1
 
-            elif c == SPOW:
+            elif cc == SPOW:
                 sp -= 2
                 stack[sp] = stack[sp] ** stack[sp + 1]
                 sp += 1
 
-            elif c == SNEG:
+            elif cc == SNEG:
                 stack[sp - 1] = -stack[sp - 1]
-            elif c == SSIN:
+            elif cc == SSIN:
                 stack[sp - 1] = sin(stack[sp - 1])
-            elif c == SCOS:
+            elif cc == SCOS:
                 stack[sp - 1] = cos(stack[sp - 1])
-            elif c == STAN:
+            elif cc == STAN:
                 stack[sp - 1] = tan(stack[sp - 1])
-            elif c == SASIN:
+            elif cc == SASIN:
                 stack[sp - 1] = asin(stack[sp - 1])
-            elif c == SACOS:
+            elif cc == SACOS:
                 stack[sp - 1] = acos(stack[sp - 1])
-            elif c == SATAN:
+            elif cc == SATAN:
                 stack[sp - 1] = atan(stack[sp - 1])
-            elif c == SLOG:
+            elif cc == SLOG:
                 stack[sp - 1] = log(stack[sp - 1]) if stack[sp - 1] != zero else zero
-            elif c == SEXP:
+            elif cc == SEXP:
                 stack[sp - 1] = exp(stack[sp - 1])
 
             pc += 1
+            cc = code[pc]
 
         return stack[0]
 
-    def compile(self, fx):
-        self.tree = self.parser(fx)
-        self.tr.finish()
-        self.eval()  # warm up
+    def compile(_, fx):
+        _.tree = _.parser(fx)
+        _.tr.finish()
+        _.eval()  # warm up
 
     def eval(self, z=1 + 1j):
         return ZExpression.execute_pcode(z=z, code=self.tr.code, const_tab=self.tr.const_tab)
@@ -441,20 +452,19 @@ if __name__ == '__main__':
         print(f'total time: {tot_t}')
 
 
-    @numba.njit(parallel=True, fastmath=True) # eval code in njit using zeval evaluator
+    # @numba.njit(parallel=True, fastmath=True)  # eval code in njit using zeval evaluator
     def njit_eval_sum(zeval, code, const_tab, z, n):
         # print(zexec, code, const_tab)
-        res = np.empty(n, dtype=numba.complex64)
-        for i in numba.prange(n): # do parallel eval
-            res[i] = zeval(z, code, const_tab)
-        s = 0 + 0j
-        for i in numba.prange(n):
-            s += res[i]
+
+        s = 0.0
+        for i in prange(n):  # do parallel sum
+            s += zeval(z, code, const_tab)
+
         return s
 
 
     def test_expr():
-        n = int(1e5)
+        n = int(1e4)
         z = 1 + 1j
         tot_t = 0.
 

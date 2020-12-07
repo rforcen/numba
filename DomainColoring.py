@@ -29,11 +29,6 @@ class DomainColoring:  # jit, parallel and expression evaluator
         return DomainColoring._generate_z_compiled(DomainColoring.z_compiler(fz), w, h)
 
     @staticmethod
-    @njit(parallel=True, fastmath=True)
-    def _generate_z_compiled_llvm_exec(zExpression, h, w):
-        pass
-
-    @staticmethod
     def generate(fz, h, w):
         zeval, code, const_tab = ZExpression().set_fz(fz)
         return DomainColoring._generate_z_compiled(zeval, code, const_tab, w, h)
@@ -128,4 +123,19 @@ if __name__ == '__main__':
             Image.frombytes(mode='RGBA', size=(n, n), data=img).show(f'dc{i}.png')  # save(f'dc{i}.png', format='png')
 
 
-    test_dc(1024)
+    def test_func():
+        mf = 1
+        w, h = 1920 * mf, 1920 * mf
+        fz = 'z*sin(c(0,1)/cos(3/z)+tan(1/z+1))'
+        print(f'generating {fz} on {w} x {h} grid...')
+
+        DomainColoring.generate(fz, 10, 10)  # warm up
+        t0 = time()
+        img = DomainColoring.generate(fz, w, h)
+        t0 = time() - t0
+        print(f'domain coloring: {fz}, lap for {w} x {h} items, numba parallel njit expression:{t0}')
+        Image.frombytes(mode='RGBA', size=(w, h), data=img).show()  # save(f'dc{i}.png', format='png')
+
+
+    test_func()
+    # test_dc(1024)
